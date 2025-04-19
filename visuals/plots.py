@@ -1,3 +1,5 @@
+import math
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -6,65 +8,50 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from matplotlib.ticker import FuncFormatter
+
 import plotly.io as pio
 pio.renderers.default = "iframe"
 
 
-def plot_snapshot_metrics_by_field(data, metrics=["Graduates", "Tuition", "Median income"], height=500, width=800, staticPlot=True):
+def format_thousands(x, pos):
+    return f'{int(x/1000)}K' if x >= 1000 else int(x)
+
+
+def plot_snapshot_metrics(data, width=5, height=3.5, metrics=["Graduates", "Tuition", "Median income"]):
     latest_year = data["Year"].max()
     latest_data = data[data["Year"] == latest_year].copy()
 
-    fields_order = latest_data.sort_values(by="Graduates", ascending=True)["Field of study"]
+    fig, axes = plt.subplots(1, len(metrics), figsize=(4 * len(metrics), 3.5), sharey=True)
 
-    # Prepare one trace per metric
-    traces = []
-    for metric in metrics:
-        trace = go.Bar(
-            y=latest_data.set_index("Field of study").loc[fields_order][metric],
-            x=fields_order,
-            orientation="v",
-            name=metric,
-            visible=(metric == metrics[0]),
-            hovertemplate=f"{metric}: %{{y:,.0f}}<extra></extra>",
-        )
-        traces.append(trace)
-
-    # Create buttons for the dropdown
-    buttons = []
     for i, metric in enumerate(metrics):
-        visibility = [j == i for j in range(len(metrics))]
-        buttons.append(dict(
-            label=metric,
-            method="update",
-            args=[{"visible": visibility}, {"title": f"{metric} by Field of Study ({latest_year})"}]
-        ))
+        ax = axes[i]
+        
+        # Sort data by current metric
+        sorted_data = latest_data.sort_values(by=metric, ascending=True)
+        fields_order = sorted_data["Field of study"]
 
-    # Build the figure
-    fig = go.Figure(data=traces)
-    fig.update_layout(
-        updatemenus=[dict(
-            type="dropdown",
-            direction="down",
-            showactive=True,
-            x=1.05,
-            xanchor="left",
-            y=1,
-            buttons=buttons,
-        )],
-        title=f"{metrics[0]} by Field of Study ({latest_year})",
-        xaxis_title=metrics[0],
-        yaxis_title="Field of Study",
-        height=height,
-        width=width,
-        margin=dict(t=60)
-    )
+        # Plot
+        bars = ax.barh(
+            y=fields_order,
+            width=sorted_data[metric].values
+        )
 
-    fig.show(config={'staticPlot': staticPlot})
+        # Format x-axis ticks as '1K'
+        ax.xaxis.set_major_formatter(FuncFormatter(format_thousands))
+
+        # Titles and labels
+        ax.set_title(f"{metric} ({latest_year})")
+        ax.set_xlabel(metric)
+        ax.set_ylabel("Field of Study" if i == 0 else "")
+
+    plt.tight_layout()
+    plt.show()
 
 
-def plot_roi_by_field(data, height=500, width=800, staticPlot=True):
+def plot_roi_by_field(data, height=5, width=8, num_years=3):
     latest_year = data["Year"].max()
-    data_3y = data[data["Year"] >= latest_year - 2]
+    data_3y = data[data["Year"] >= latest_year - num_years + 1]
 
     # Compute 3-year averages
     avg_data = data_3y.groupby("Field of study").agg({
@@ -72,36 +59,27 @@ def plot_roi_by_field(data, height=500, width=800, staticPlot=True):
         "ESI": "mean"
     }).reset_index()
 
-    # Sort by ROI descending
-    avg_data = avg_data.sort_values("ROI", ascending=True)
+    # Sort by ROI ascending (for horizontal barplot bottom-to-top)
+    avg_data = avg_data.sort_values("ROI", ascending=False)
 
-    # Plot with Plotly Express
-    fig = px.bar(
-        avg_data,
+    # Create the plot
+    plt.figure(figsize=(width, height))
+    barplot = sns.barplot(
+        data=avg_data,
         x="ROI",
-        y="Field of study",
-        orientation="h",
-        hover_data={
-            "ROI": ":.2f",
-            "ESI": ":.3f"
-        },
-        title=f"Average ROI by Field of Study ({latest_year-2}–{latest_year})"
+        y="Field of study"
     )
 
-    fig.update_layout(
-        xaxis_title="Return on Investment (ROI)",
-        yaxis_title="Field of Study",
-        height=height,
-        width=width,
-        margin=dict(t=60)
-    )
-
-    fig.show(config={'staticPlot': staticPlot})
+    plt.title(f"Average ROI by Field of Study ({latest_year-num_years+1}–{latest_year})", pad=20)
+    plt.xlabel("Return on Investment (ROI)")
+    plt.ylabel("Field of Study")
+    plt.tight_layout()
+    plt.show()
 
 
-def plot_income_vs_tuition_bubble(data, height=600, width=800, staticPlot=True):
+def plot_income_vs_tuition_bubble(data, num_years=3, height=6, width=10, bubble_size=25):
     latest_year = data["Year"].max()
-    recent_years = data["Year"] >= (latest_year - 2)
+    recent_years = data["Year"] >= (latest_year - num_years + 1)
     data_3y = data[recent_years]
 
     # Average key metrics per field
@@ -111,134 +89,195 @@ def plot_income_vs_tuition_bubble(data, height=600, width=800, staticPlot=True):
         "Graduate Share (%)": "mean"
     }).reset_index()
 
-    # Sort for better layer stacking
+    # Sort for better layering (bigger bubbles go to the back)
     avg_data = avg_data.sort_values("Graduate Share (%)", ascending=False)
 
-    fig = go.Figure()
-
-    fig.add_trace(go.Scatter(
+    plt.figure(figsize=(width, height))
+    scatter = plt.scatter(
         x=avg_data["Tuition (4Y)"],
         y=avg_data["Median income"],
-        mode="markers+text",
-        text=avg_data["Field of study"],
-        textposition="middle center",
-        customdata=avg_data[["Graduate Share (%)"]],  # Pass true values
-        marker=dict(
-            size=avg_data["Graduate Share (%)"] * 2.5,
-            color="skyblue",
-            line=dict(width=1, color="gray"),
-            opacity=0.7
-        ),
-        hovertemplate=(
-            "<b>%{text}</b><br>" +
-            "Tuition (4Y): $%{x:,.0f}<br>" +
-            "Median Income: $%{y:,.0f}<br>" +
-            "Graduate Share: %{customdata[0]:.1f}%<extra></extra>"
-        )
-    ))
-
-    fig.update_layout(
-        title=f"Degree Cost vs. Median Income by Field of Study ({latest_year-2}–{latest_year})",
-        xaxis_title="Tuition (4Y $)",
-        yaxis_title="Median Income ($)",
-        height=height,
-        width=width,
-        margin=dict(t=60)
+        s=avg_data["Graduate Share (%)"] * bubble_size,  # Bubble size scaling
+        color="skyblue",
+        edgecolors="gray",
+        alpha=0.7
     )
 
-    fig.show(config={'staticPlot': staticPlot})
+    # Add text labels inside bubbles
+    for i, row in avg_data.iterrows():
+        plt.text(
+            row["Tuition (4Y)"],
+            row["Median income"],
+            row["Field of study"],
+            ha="center", va="center",
+            fontsize=7,
+            color="black"
+        )
+
+    plt.title(f"Degree Cost vs. Median Income by Field of Study ({latest_year - num_years + 1}–{latest_year})", pad=20)
+    plt.xlabel("Tuition (4Y $)")
+    plt.ylabel("Median Income ($)")
+    #plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 
-def plot_saturation_circle_packing(data, height=600, width=600, staticPlot=True):
+def plot_roi_over_time(data, height=10, width=5):
+    # Filter only rows with non-null ROI
+    df_roi = data[data["ROI"].notnull()].copy()
+    
+    plt.figure(figsize=(height, width))
+    sns.lineplot(data=df_roi, x="Year", y="ROI", hue="Field of study", marker="o")
+
+    plt.title("ROI Over Time by Field of Study")
+    plt.xlabel("Year")
+    plt.ylabel("ROI")
+    plt.legend(title="Field of study", bbox_to_anchor=(1.05, 1), loc="upper left")
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_trend_overview(data, metrics, short_names=None, stacked_metrics=["Graduate Share (%)"], height=5, width=5):
+    df_plot = data.copy()
+
+    if short_names:
+        df_plot["Field (Short)"] = df_plot["Field of study"].map(short_names)
+        field_col = "Field (Short)"
+    else:
+        field_col = "Field of study"
+
+    n_metrics = len(metrics)
+    ncols = 2
+    nrows = math.ceil(n_metrics / ncols)
+
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(width * ncols, height * nrows), sharex=True)
+
+    # Flatten axes for easy indexing
+    axes = axes.flatten()
+
+    for i, metric in enumerate(metrics):
+        ax = axes[i]
+
+        if metric in stacked_metrics:
+            # Stacked area plot
+            df_stack = df_plot.pivot_table(index="Year", columns=field_col, values=metric, aggfunc="mean").fillna(0)
+            df_stack.plot.area(ax=ax, cmap="tab20", legend=True)
+            ax.set_ylabel("Share (%)")
+            ax.set_title("Graduate Share Over Time (Stacked)")
+        else:
+            sns.lineplot(data=df_plot, x="Year", y=metric, hue=field_col, ax=ax, marker="o", legend=True)
+            ax.set_ylabel(metric)
+            ax.set_title(f"{metric} Over Time")
+            #ax.grid(True)
+
+    # Hide any unused subplot axes
+    for j in range(len(metrics), len(axes)):
+        fig.delaxes(axes[j])
+    
+    plt.tight_layout()
+    
+    plt.show()
+
+
+def plot_esi_by_field(data, height=5, width=8, num_years=3, threshold=0.90):
     latest_year = data["Year"].max()
-    data_3y = data[data["Year"] >= latest_year - 2]
+    data_recent = data[data["Year"] >= latest_year - num_years + 1]
 
-    # Average values across 3 years
-    avg_data = data_3y.groupby("Field of study").agg({
-        "Graduates (5Y)": "mean",
-        "Employed (25%)": "mean"
+    # Compute average ESI over the selected years
+    avg_data = data_recent.groupby("Field of study").agg({
+        "ESI": "mean"
     }).reset_index()
 
-    # Compute Employed estimate and Saturation Index
-    avg_data["Employed"] = avg_data["Employed (25%)"] * 4
-    avg_data["Saturation per 1K Employed"] = (
-        avg_data["Graduates (5Y)"] / avg_data["Employed"]
-    ) * 1000
+    # Sort descending (best ESI on top)
+    avg_data = avg_data.sort_values("ESI", ascending=False)
 
-    # Determine threshold (median-based)
-    threshold = avg_data["Saturation per 1K Employed"].median()
-    avg_data["Color"] = np.where(
-        avg_data["Saturation per 1K Employed"] > threshold,
-        "tomato", "mediumseagreen"
+    # Plot
+    plt.figure(figsize=(width, height))
+    sns.barplot(
+        data=avg_data,
+        x="ESI",
+        y="Field of study"
     )
 
-    # Arrange bubbles in circular layout
-    angles = np.linspace(0, 2 * np.pi, len(avg_data), endpoint=False)
-    avg_data["x"] = np.cos(angles)
-    avg_data["y"] = np.sin(angles)
-    avg_data["size"] = np.sqrt(avg_data["Saturation per 1K Employed"]) * 25
+    # Add threshold line
+    plt.axvline(threshold, color="red", linestyle="--", linewidth=1.5)
+    plt.text(threshold-0.5, -0.8, f"Instability Threshold ({threshold:.2f})", color="red")
 
-    # Build figure
-    fig = go.Figure()
-    
-    cmin = avg_data["Saturation per 1K Employed"].min()
-    cmax = avg_data["Saturation per 1K Employed"].max()
+    # Labels and layout
+    plt.title(f"Average Employment Stability Index by Field ({latest_year - num_years + 1}–{latest_year})", pad=20)
+    plt.xlabel("Employment Stability Index (ESI)")
+    plt.ylabel("Field of Study")
+    plt.xlim(0, 1.0)
+    plt.tight_layout()
+    plt.show()
 
+
+def plot_grad_growth_vs_employment(data, num_years=3, width=8, height=6):
+    df_plot = data.copy()
+
+    # Filter for the latest num_years
+    latest_year = df_plot["Year"].max()
+    df_recent = df_plot[df_plot["Year"] >= latest_year - num_years + 1]
+
+    # Compute 3-year averages
+    avg_data = df_recent.groupby("Field of study").agg({
+        "Graduate Growth Rate (%)": "mean",
+        "Employment rate": "mean"
+    }).reset_index()
+
+    # Drop rows with missing values
+    avg_data = avg_data.dropna(subset=["Graduate Growth Rate (%)", "Employment rate"])
+
+    # Plot
+    plt.figure(figsize=(width, height))
+    sns.scatterplot(
+        data=avg_data,
+        x="Graduate Growth Rate (%)",
+        y="Employment rate",
+        hue="Field of study",
+        s=100,
+        alpha=0.8,
+        edgecolor="gray",
+        legend=False
+    )
+
+    # Add field labels to each point
     for _, row in avg_data.iterrows():
-        fig.add_trace(go.Scatter(
-            x=[row["x"]],
-            y=[row["y"]],
-            mode="markers+text",
-            marker=dict(
-                size=row["size"],
-                color=row["Saturation per 1K Employed"],
-                colorscale="Reds",  # or "RdYlBu", "Picnic"
-                cmin=cmin,     # optional: set min for consistent scale
-                cmax=cmax,     # optional: set max for consistent scale
-                showscale=False,
-                colorbar=dict(title="Saturation per 1K Employed"),
-                line=dict(width=1, color="black"),
-                opacity=0.8
-            ),
-            text=[row["Field of study"]],
-            textposition="middle center",
-            hovertemplate=(
-                f"<b>{row['Field of study']}</b><br>"
-                f"Saturation: {row['Saturation per 1K Employed']:.1f} grads per 1K employed<extra></extra>"
-            ),
-            showlegend=False
-        ))
+        plt.text(
+            row["Graduate Growth Rate (%)"] + 0.1,
+            row["Employment rate"],
+            row["Field of study"],
+            fontsize=9
+        )
 
-    fig.update_layout(
-        title="Saturation per 1K Employed (3-Year Average)",
-        xaxis=dict(showgrid=False, zeroline=False, visible=False),
-        yaxis=dict(showgrid=False, zeroline=False, visible=False),
-        height=height,
-        width=width,
-        margin=dict(t=60)
+    # Format the plot
+    plt.title(f"Graduate Growth vs Employment Rate ({latest_year - num_years + 1}–{latest_year})")
+    plt.xlabel("Graduate Growth Rate (%)")
+    plt.ylabel("Employment Rate (%)")
+    #plt.axhline(0, linestyle="--", color="gray", linewidth=1)
+    plt.axvline(0, linestyle="--", color="gray", linewidth=1)
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_correlation_heatmap(data, metrics, figsize=(8, 6), title="Correlation Matrix"):
+    # Drop rows with missing values in selected metrics
+    df_corr = data[metrics].dropna()
+
+    # Compute correlation matrix
+    corr = df_corr.corr()
+
+    # Plot heatmap
+    plt.figure(figsize=figsize)
+    sns.heatmap(
+        corr,
+        annot=True,
+        fmt=".2f",
+        cmap="Blues",
+        center=0,
+        linewidths=0.5,
+        square=True,
+        cbar_kws={"shrink": 0.75}
     )
-
-    fig.show(config={'staticPlot': staticPlot})    
-
-    
-
-
-def plot_employment_vs_saturation():
-    pass
-
-
-def plot_trend_metrics_by_field():
-    pass
-
-
-def plot_roi_over_time():
-    pass
-
-
-def plot_correlation_heatmap():
-    pass
-
-
-def generate_summary_flag_table():
-    pass
-
+    plt.title(title, pad=16)
+    plt.tight_layout()
+    plt.show()
