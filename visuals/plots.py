@@ -56,7 +56,6 @@ def plot_roi_by_field(data, height=5, width=8, num_years=3):
     # Compute 3-year averages
     avg_data = data_3y.groupby("Field of study").agg({
         "ROI": "mean",
-        "ESI": "mean"
     }).reset_index()
 
     # Sort by ROI ascending (for horizontal barplot bottom-to-top)
@@ -77,6 +76,33 @@ def plot_roi_by_field(data, height=5, width=8, num_years=3):
     plt.show()
 
 
+def plot_employment_rate_by_field(data, height=5, width=8, num_years=3):
+    latest_year = data["Year"].max()
+    data_3y = data[data["Year"] >= latest_year - num_years + 1]
+
+    # Compute 3-year averages
+    avg_data = data_3y.groupby("Field of study").agg({
+        "Employment rate": "mean",
+    }).reset_index()
+
+    # Sort by ROI ascending (for horizontal barplot bottom-to-top)
+    avg_data = avg_data.sort_values("Employment rate", ascending=False)
+
+    # Create the plot
+    plt.figure(figsize=(width, height))
+    barplot = sns.barplot(
+        data=avg_data,
+        x="Employment rate",
+        y="Field of study"
+    )
+
+    plt.title(f"Average Employment Rate by Field of Study ({latest_year-num_years+1}–{latest_year})", pad=20)
+    plt.xlabel("Employment Rate (%)")
+    plt.ylabel("Field of Study")
+    plt.tight_layout()
+    plt.show()
+
+
 def plot_income_vs_tuition_bubble(data, num_years=3, height=6, width=10, bubble_size=25):
     latest_year = data["Year"].max()
     recent_years = data["Year"] >= (latest_year - num_years + 1)
@@ -84,7 +110,7 @@ def plot_income_vs_tuition_bubble(data, num_years=3, height=6, width=10, bubble_
 
     # Average key metrics per field
     avg_data = data_3y.groupby("Field of study").agg({
-        "Tuition (4Y)": "mean",
+        "Degree Cost": "mean",
         "Median income": "mean",
         "Graduate Share (%)": "mean"
     }).reset_index()
@@ -94,7 +120,7 @@ def plot_income_vs_tuition_bubble(data, num_years=3, height=6, width=10, bubble_
 
     plt.figure(figsize=(width, height))
     scatter = plt.scatter(
-        x=avg_data["Tuition (4Y)"],
+        x=avg_data["Degree Cost"],
         y=avg_data["Median income"],
         s=avg_data["Graduate Share (%)"] * bubble_size,  # Bubble size scaling
         color="skyblue",
@@ -105,7 +131,7 @@ def plot_income_vs_tuition_bubble(data, num_years=3, height=6, width=10, bubble_
     # Add text labels inside bubbles
     for i, row in avg_data.iterrows():
         plt.text(
-            row["Tuition (4Y)"],
+            row["Degree Cost"],
             row["Median income"],
             row["Field of study"],
             ha="center", va="center",
@@ -113,8 +139,8 @@ def plot_income_vs_tuition_bubble(data, num_years=3, height=6, width=10, bubble_
             color="black"
         )
 
-    plt.title(f"Degree Cost vs. Median Income by Field of Study ({latest_year - num_years + 1}–{latest_year})", pad=20)
-    plt.xlabel("Tuition (4Y $)")
+    plt.title(f"Avg Degree Cost vs. Avg Median Income by Field of Study ({latest_year - num_years + 1}–{latest_year})\n(Size = Graduate Share)", pad=20)
+    plt.xlabel("Degree Cost ($)")
     plt.ylabel("Median Income ($)")
     #plt.grid(True)
     plt.tight_layout()
@@ -136,45 +162,34 @@ def plot_roi_over_time(data, height=10, width=5):
     plt.show()
 
 
-def plot_trend_overview(data, metrics, short_names=None, stacked_metrics=["Graduate Share (%)"], height=5, width=5):
+def plot_single_trend_metric(data, metric, short_names=None, stacked_metrics=["Graduate Share (%)"], height=5, width=8):
     df_plot = data.copy()
 
+    # Use short field names if provided
     if short_names:
         df_plot["Field (Short)"] = df_plot["Field of study"].map(short_names)
         field_col = "Field (Short)"
     else:
         field_col = "Field of study"
 
-    n_metrics = len(metrics)
-    ncols = 2
-    nrows = math.ceil(n_metrics / ncols)
+    # Setup figure
+    fig, ax = plt.subplots(figsize=(width, height))
 
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(width * ncols, height * nrows), sharex=True)
+    if metric in stacked_metrics:
+        # Stacked area chart
+        df_stack = df_plot.pivot_table(index="Year", columns=field_col, values=metric, aggfunc="mean").fillna(0)
+        df_stack.plot.area(ax=ax, cmap="tab20", legend=True)
+        ax.set_ylabel(metric)
+        ax.set_title(f"{metric} Over Time (Stacked)")
+    else:
+        sns.lineplot(data=df_plot, x="Year", y=metric, hue=field_col, ax=ax, marker="o", legend=True)
+        ax.set_ylabel(metric)
+        ax.set_title(f"{metric} Over Time")
+        ax.grid(True)
 
-    # Flatten axes for easy indexing
-    axes = axes.flatten()
-
-    for i, metric in enumerate(metrics):
-        ax = axes[i]
-
-        if metric in stacked_metrics:
-            # Stacked area plot
-            df_stack = df_plot.pivot_table(index="Year", columns=field_col, values=metric, aggfunc="mean").fillna(0)
-            df_stack.plot.area(ax=ax, cmap="tab20", legend=True)
-            ax.set_ylabel("Share (%)")
-            ax.set_title("Graduate Share Over Time (Stacked)")
-        else:
-            sns.lineplot(data=df_plot, x="Year", y=metric, hue=field_col, ax=ax, marker="o", legend=True)
-            ax.set_ylabel(metric)
-            ax.set_title(f"{metric} Over Time")
-            #ax.grid(True)
-
-    # Hide any unused subplot axes
-    for j in range(len(metrics), len(axes)):
-        fig.delaxes(axes[j])
-    
+    ax.set_xlabel("Year")
+    plt.legend(title="Field of study", bbox_to_anchor=(1.05, 1), loc="upper left")
     plt.tight_layout()
-    
     plt.show()
 
 
@@ -255,29 +270,5 @@ def plot_grad_growth_vs_employment(data, num_years=3, width=8, height=6):
     plt.ylabel("Employment Rate (%)")
     #plt.axhline(0, linestyle="--", color="gray", linewidth=1)
     plt.axvline(0, linestyle="--", color="gray", linewidth=1)
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_correlation_heatmap(data, metrics, figsize=(8, 6), title="Correlation Matrix"):
-    # Drop rows with missing values in selected metrics
-    df_corr = data[metrics].dropna()
-
-    # Compute correlation matrix
-    corr = df_corr.corr()
-
-    # Plot heatmap
-    plt.figure(figsize=figsize)
-    sns.heatmap(
-        corr,
-        annot=True,
-        fmt=".2f",
-        cmap="Blues",
-        center=0,
-        linewidths=0.5,
-        square=True,
-        cbar_kws={"shrink": 0.75}
-    )
-    plt.title(title, pad=16)
     plt.tight_layout()
     plt.show()

@@ -1,0 +1,9 @@
+.ipynb_checkpoints/
+.idea/
+data/graduation/
+data/income/
+data/labour/
+data/tuition/
+data/.ipynb_checkpoints/
+visuals/.ipynb_checkpoints/
+__pycache__/
